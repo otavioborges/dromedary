@@ -15,7 +15,20 @@ Sftp::Sftp(char *server, int port){
 }
 
 bool Sftp::LoadKey(char *path){
-    
+    char message[200];
+    int result;
+
+    sprintf(message, "Loading key from %s", path);
+    LogInfo::AddEntry(SFTP_LOG_ID, message, LogLevel::DEBUG);
+    result = ssh_pki_import_privkey_file(path, NULL, NULL, NULL, &m_key);
+    if(result != SSH_OK){
+        sprintf(message, "Error loading key on \'%s\'. Code: %i", path, result);
+        LogInfo::AddEntry(SFTP_LOG_ID, message, LogLevel::ERROR);
+        return false;
+    }
+
+    LogInfo::AddEntry(SFTP_LOG_ID, "Key successfully loaded", LogLevel::DEBUG);
+    return true;
 }
 
 bool Sftp::Connect(char * username){
@@ -112,4 +125,12 @@ void Sftp::Disconnect(void){
 
 bool Sftp::isConnected(void){
     return m_isConnected;
+}
+
+ssh_session *Sftp::GetSSHSession(void){
+    return &m_sshSession;
+}
+
+sftp_session *Sftp::GetSFTPSession(void){
+    return &m_sftpSession;
 }

@@ -19,6 +19,10 @@ namespace dromedary{
             bool Connect(char * username);
             void Disconnect(void);
             bool isConnected(void);
+
+            // GETs
+            ssh_session *GetSSHSession(void);
+            sftp_session *GetSFTPSession(void);
     };
 }
 
