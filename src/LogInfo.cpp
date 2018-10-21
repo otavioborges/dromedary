@@ -1,5 +1,5 @@
 #include <string.h>
-#include "logInfo.h"
+#include "LogInfo.h"
 using namespace dromedary;
 using namespace std;
 
