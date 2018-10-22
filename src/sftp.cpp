@@ -8,6 +8,7 @@ using namespace dromedary;
 using namespace std;
 
 Sftp::Sftp(char *server, int port){
+    m_server = new char[strlen(server)];
     strcpy(m_server, server);
     m_port = port;
     m_key = NULL;
