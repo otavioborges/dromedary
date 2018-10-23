@@ -6,13 +6,17 @@ SftpFunctions::SftpFunctions(Sftp *manager){
     m_sessionManager = manager;
 }
 
+bool SftpFunctions::Exists(char *path){
+
+}
+
 void SftpFunctions::List(char *path){
     sftp_dir dir;
     sftp_attributes attibutes;
 
     if(m_sessionManager == NULL)
         return;
-
+        
     dir = sftp_opendir(*m_sessionManager->GetSFTPSession(), path);
     if(!dir)
         return;

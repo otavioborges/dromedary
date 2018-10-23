@@ -9,6 +9,7 @@ namespace dromedary{
             Sftp *m_sessionManager;
         public:
             SftpFunctions(Sftp *manager);
+            bool Exists(char *path);
             void List(char *path);
     };
 }
