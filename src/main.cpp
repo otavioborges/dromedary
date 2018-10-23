@@ -12,12 +12,13 @@ int main(int argc, char const *argv[]){
     manager.LoadKey("src/id_rsa");
     manager.Connect("otavio");
 
-    SftpFunctions functions(&manager);
-    functions.List("/storage");
+    // SftpFunctions functions(&manager);
+    // functions.List("/storage");
 
-    FuseFileSystem fuse(&manager, &functions);
-    fuse.Mount("/home/otavio/fuse");
+    InitFuse(&manager);
+    Mount("/home/otavio/fuse");
     cin >> desmanche;
-    fuse.Unmount();
+    Unmount();
+
     return 0;
 }
