@@ -16,7 +16,8 @@ typedef struct openedFile{
     uint64_t length;
 };
 
-openedFile currentFile;
+openedFile currentFile[8];
+int filesCount = 0;
 
 static void *FuseThread(void *arg){
     if(arg == NULL){
@@ -40,6 +41,9 @@ static int fuseWrite(const char *path, const char *buf, size_t size, off_t offse
 static int fuseMkdir(const char *path, mode_t mode);
 static int fuseCreate(const char *path, mode_t mode, struct fuse_file_info *fi);
 static int fuseUnlink(const char *path);
+static int fuseChown(const char *path, uid_t uid, gid_t gid);
+static int fuseChmod(const char *path, mode_t mode);
+static int fuseRename(const char *original, const char *newname);
 
 Sftp                *gManager = NULL;
 char                *gMountPoint = NULL;
@@ -61,6 +65,9 @@ void InitFuse(Sftp *manager){
     operations.create  = fuseCreate;
     operations.readdir = fuseReadDir;
     operations.unlink  = fuseUnlink;
+    operations.chown   = fuseChown;
+    operations.chmod   = fuseChmod;
+    operations.rename  = fuseRename;
 }
 
 bool Mount(char *mountpoint){
@@ -134,6 +141,9 @@ static int fuseReadDir(const char *path, void *buf, fuse_fill_dir_t filler, off_
 }
 
 static int fuseOpen(const char *path, struct fuse_file_info *fi){
+    if(filesCount >= 8)
+        return -EMFILE;
+
     sftp_file file = sftp_open(*gManager->GetSFTPSession(), path, fi->flags, 0);
     if(file == NULL)
         return -ENOENT;
@@ -142,48 +152,60 @@ static int fuseOpen(const char *path, struct fuse_file_info *fi){
     if(attr == NULL)
         return -ENOENT;
 
-    currentFile.path = new char[strlen(path)];
-    strcpy(currentFile.path, path);
-    currentFile.file = file;
-    currentFile.opened = true;
-    currentFile.length = attr->size;
+    currentFile[filesCount].path = new char[strlen(path)];
+    strcpy(currentFile[filesCount].path, path);
+    currentFile[filesCount].file = file;
+    currentFile[filesCount].opened = true;
+    currentFile[filesCount].length = attr->size;
+    filesCount++;
 
     return 0;
 }
 
 static int fuseRead(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
     (void) fi;
+    int fileIdx;
 
-    if((currentFile.opened) && (strcmp(path, currentFile.path) == 0)){
-        // use buffered file pointer
-        if(offset > currentFile.length){
-            return 0; // beyond file size
-        }else{
-            if((size + offset) > currentFile.length)
-                size = currentFile.length - offset;
-            
-            if(currentFile.file->offset != offset)
-                sftp_seek(currentFile.file, offset);
-            
-            return sftp_read(currentFile.file, buf, size);
-        }
+    for(fileIdx = 0; fileIdx < filesCount; fileIdx++){
+        if(strcmp(path, currentFile[fileIdx].path) == 0)
+            break;
     }
 
-    LogInfo::AddEntry(FUSE_LOG_ID, "Trying to read on closed file, ignore", LogLevel::WARNING);
-    return -EBADF;
+    if(fileIdx >= filesCount){
+        LogInfo::AddEntry(FUSE_LOG_ID, "Trying to read on closed file, ignore", LogLevel::WARNING);
+        return -EBADF;
+    }
+
+    if(offset > currentFile[fileIdx].length){
+        return 0; // beyond file size
+    }else{
+        if((size + offset) > currentFile[fileIdx].length)
+            size = currentFile[fileIdx].length - offset;
+        
+        if(currentFile[fileIdx].file->offset != offset)
+            sftp_seek(currentFile[fileIdx].file, offset);
+        
+        return sftp_read(currentFile[fileIdx].file, buf, size);
+    }
 }
 
 static int fuseWrite(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi){
-    if((currentFile.opened) && (strcmp(path, currentFile.path) == 0)){
-        // use buffered file pointer
-        if(currentFile.file->offset != offset)
-            sftp_seek(currentFile.file, offset);
-        
-        return sftp_write(currentFile.file, buf, size);
+    int fileIdx;
+
+    for(fileIdx = 0; fileIdx < filesCount; fileIdx++){
+        if(strcmp(path, currentFile[fileIdx].path) == 0)
+            break;
     }
 
-    LogInfo::AddEntry(FUSE_LOG_ID, "Trying to write on closed file, ignore", LogLevel::WARNING);
-    return -EBADF;
+    if(fileIdx >= filesCount){
+        LogInfo::AddEntry(FUSE_LOG_ID, "Trying to read on closed file, ignore", LogLevel::WARNING);
+        return -EBADF;
+    }
+
+    if(currentFile[fileIdx].file->offset != offset)
+        sftp_seek(currentFile[fileIdx].file, offset);
+    
+    return sftp_write(currentFile[fileIdx].file, buf, size);
 }
 
 static int fuseMkdir(const char *path, mode_t mode){
@@ -193,19 +215,32 @@ static int fuseMkdir(const char *path, mode_t mode){
 }
 
 static int fuseCreate(const char *path, mode_t mode, struct fuse_file_info *fi){
-    sftp_file file = sftp_open(*gManager->GetSFTPSession(), path, fi->flags, mode);
+    sftp_file file = sftp_open(*gManager->GetSFTPSession(), path, fi->flags, mode); // always allow 
     if(file == NULL)
         return -ENOENT;
     
-    currentFile.path = new char[strlen(path)];
-    strcpy(currentFile.path, path);
-    currentFile.file = file;
-    currentFile.opened = true;
-    currentFile.length = 0;
-
-    return 0;
+    if(sftp_close(file) != 0)
+        return -EACCES;
+    
+    return sftp_chown(*gManager->GetSFTPSession(), path, 1000, 1000); // default to user on config
 }
 
 static int fuseUnlink(const char *path){
     return sftp_unlink(*gManager->GetSFTPSession(), path);
+}
+
+static int fuseChown(const char *path, uid_t uid, gid_t gid){
+    return sftp_chown(*gManager->GetSFTPSession(), path, uid, gid);
+}
+
+static int fuseChmod(const char *path, mode_t mode){
+    return sftp_chmod(*gManager->GetSFTPSession(), path, mode);
+}
+
+static int fuseRename(const char *original, const char *newname){
+    return sftp_rename(*gManager->GetSFTPSession(), original, newname);
+}
+
+static int fuseRelease(const char *path, struct fuse_file_info *fi){
+
 }
